@@ -1,0 +1,10 @@
+# Téléchargements et fichiers produits
+build/
+dist/
+dist-test/
+.dist-new/
+node_modules/
+__pycache__/
+# Données et réglages propres à un serveur
+reports/
+docker-compose.override.yml

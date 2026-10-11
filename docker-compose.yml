@@ -1,0 +1,52 @@
+# Flouter : site statique (Caddy) + mode secours (api/).
+#   python3 build.py && docker compose up -d   ->   http://127.0.0.1:8088
+# En production, placer un proxy HTTPS devant (ou adapter le Caddyfile).
+# Réglages propres à un serveur (réseau du proxy, version de test…) : docker-compose.override.yml
+services:
+  flou:
+    image: caddy:2-alpine
+    container_name: flou
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp, /data, /config]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    ports: ["127.0.0.1:8088:80"]
+    volumes:
+      - ./dist:/srv:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    logging:
+      driver: none   # aucun journal d'accès
+    networks: [public, flou-internal]
+
+  api:
+    image: flou-api
+    build: ./api
+    container_name: flou-api
+    restart: unless-stopped
+    environment:
+      MAX_MINUTES: 10   # durée max traitée (au-delà, la vidéo est coupée)
+      MAX_MB: 600       # taille max d'un envoi
+      MAX_QUEUE: 8      # vidéos en attente au maximum
+      WORK_MB: 2800     # place réservable dans /work (taille du tmpfs moins une marge)
+    read_only: true
+    # Vidéos en mémoire vive uniquement, jamais sur disque
+    tmpfs:
+      - /work:size=3g,mode=0700,uid=1000,noexec,nosuid,nodev
+      - /tmp:size=256m,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ./reports:/reports   # signalements de problèmes (ni fichier, ni IP)
+    cpus: 3
+    mem_limit: 4g
+    pids_limit: 256
+    logging:
+      driver: none
+    # Réseau isolé : ni internet, ni accès aux autres applications du serveur
+    networks: [flou-internal]
+
+networks:
+  public: {}
+  flou-internal:
+    internal: true
