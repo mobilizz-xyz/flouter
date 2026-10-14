@@ -4,7 +4,7 @@
 import { createFile, MP4BoxBuffer, DataStream, Endianness } from './vendor/mp4box/mp4box.all.mjs';
 import { el, fmtTime, sleep } from './dom.js';
 import { modelReady, detectFaces } from './engine.js';
-import { anonymize } from './anonymize.js';
+import { MASK_SCALE, anonymize } from './anonymize.js';
 import { settings } from './settings.js';
 import { addItem, setCancelled, setReady, setSub, setThumb, updateBulk } from './list.js';
 import { closeViewer, openViewer } from './viewer.js';
@@ -70,8 +70,8 @@ function makeProcessor(job, W, H, rotation, venc, fps) {
     f.src.close();
     if (firstTs === null) firstTs = f.ts;
     job.cache?.set(f.ts, boxes);
-    anonymize(ctx, boxes, job.s.mode);
-    if (manual.length) anonymize(ctx, manualAt(manual, (f.ts - firstTs) / 1e6, W, H), job.s.mode, 1);
+    anonymize(ctx, boxes, job.s.mode, MASK_SCALE, job.s.oval);
+    if (manual.length) anonymize(ctx, manualAt(manual, (f.ts - firstTs) / 1e6, W, H), job.s.mode, 1, job.s.oval);
     const vf = new VideoFrame(view, { timestamp: f.ts, duration: f.dur });
     venc.encode(vf, { keyFrame: encoded % (fps * 2) === 0 });
     vf.close();

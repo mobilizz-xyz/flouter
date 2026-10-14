@@ -53,6 +53,11 @@ def edit(path, fn):
         f.write(fn(s))
 
 
+def digest(name):
+    with open(f'{TMP}/{name}', 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()[:10]
+
+
 def rename_refs(s):
     for a, b in RENAME.items():
         s = s.replace(a, b)
@@ -78,6 +83,12 @@ def build():
     edit(f'{TMP}/w.js', rename_refs)
     edit(f'{TMP}/e.mjs', rename_refs)
     edit(f'{TMP}/s.css', lambda s: s.replace('fonts/', ''))  # polices publiées à la racine
+    # Adresses liées au contenu (?v=…) : Cloudflare fait garder 4 h le code aux navigateurs,
+    # une nouvelle version doit donc changer d'adresse pour être chargée tout de suite.
+    edit(f'{TMP}/a.js', lambda s: s.replace('./w.js', f'./w.js?v={digest("w.js")}'))
+    for page in PAGES:
+        edit(f'{TMP}/{page}', lambda s: s.replace('href="s.css"', f'href="s.css?v={digest("s.css")}"')
+             .replace('src="a.js"', f'src="a.js?v={digest("a.js")}"').replace('src="t.js"', f'src="t.js?v={digest("t.js")}"'))
 
     with open(f'{TMP}/licences.txt', 'w') as out:
         out.write('Ce site utilise les composants libres suivants. Leurs licences sont reproduites ci-dessous.\n')

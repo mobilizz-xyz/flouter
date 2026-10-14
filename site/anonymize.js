@@ -1,5 +1,6 @@
 // Anonymisation d'une zone de l'image : aplat noir (avec ou sans émoji), pixels ou flou destructif.
 // Mode : 'solid', 'pixel', 'blur', ou 'emoji:<émoji>' (émoji posé sur l'aplat noir).
+// Forme : rectangle (par défaut) ou ovale inscrit dans le même cadre.
 
 export const MASK_SCALE = 1.3; // agrandissement des zones, comme deface
 
@@ -14,8 +15,8 @@ export function grow(z, scale) {
   return { x: z.x + (z.w - w) / 2, y: z.y + (z.h - h) / 2, w, h };
 }
 
-// Masque rectangulaire : une ellipse laisserait les coins (cheveux, oreilles, menton) visibles.
-export function anonymize(ctx, zones, mode, scale = MASK_SCALE) {
+// Rectangle par défaut : l'ovale laisse les coins (cheveux, oreilles, menton) visibles.
+export function anonymize(ctx, zones, mode, scale = MASK_SCALE, oval = false) {
   const W = ctx.canvas.width, H = ctx.canvas.height;
   const emoji = mode.startsWith('emoji:') ? mode.slice(6) : null;
   for (const z0 of zones) {
@@ -23,6 +24,12 @@ export function anonymize(ctx, zones, mode, scale = MASK_SCALE) {
     const x = Math.max(0, Math.floor(z.x)), y = Math.max(0, Math.floor(z.y));
     const w = Math.min(W, Math.ceil(z.x + z.w)) - x, h = Math.min(H, Math.ceil(z.y + z.h)) - y;
     if (w < 2 || h < 2) continue;
+    ctx.save();
+    if (oval) {
+      ctx.beginPath();
+      ctx.ellipse(z.x + z.w / 2, z.y + z.h / 2, z.w / 2, z.h / 2, 0, 0, Math.PI * 2);
+      ctx.clip();
+    }
     if (mode === 'solid' || emoji) {
       ctx.fillStyle = '#000';
       ctx.fillRect(x, y, w, h);
@@ -36,6 +43,7 @@ export function anonymize(ctx, zones, mode, scale = MASK_SCALE) {
         ctx.fillText(emoji, x + w / 2, y + h / 2 + s * 0.06);
         ctx.restore();
       }
+      ctx.restore();
       continue;
     }
     // Réduction drastique puis agrandissement : il ne reste que quelques couleurs,
@@ -52,6 +60,7 @@ export function anonymize(ctx, zones, mode, scale = MASK_SCALE) {
     ctx.imageSmoothingEnabled = mode !== 'pixel';
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(tiny, 0, 0, n, n, x, y, w, h);
+    ctx.restore();
     ctx.restore();
   }
 }

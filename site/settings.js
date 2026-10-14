@@ -10,6 +10,7 @@ export function settings() {
   const mode = $('input[name=mode]:checked').value;
   return {
     mode: mode === 'emoji' ? 'emoji:' + emoji : mode,
+    oval: $('input[name=shape]:checked').value === 'oval',
     threshold: sens === 'high' ? 0.1 : 0.2,
     high: sens === 'high',
     keepAudio: $('#keep-audio').checked,
@@ -63,6 +64,7 @@ function initStyles() {
     const m = $('input[name=mode]:checked').value;
     $('#emojis').hidden = m !== 'emoji';
     remember('flouter-mode', m);
+    remember('flouter-shape', $('input[name=shape]:checked').value);
   };
   $('#styles').addEventListener('change', showPanel);
 
@@ -75,6 +77,7 @@ function initStyles() {
   const mode = recall('flouter-mode');
   const radio = mode && $(`input[name=mode][value="${CSS.escape(mode)}"]`);
   if (radio) radio.checked = true;
+  if (recall('flouter-shape') === 'oval') $('input[name=shape][value=oval]').checked = true;
   showPanel();
 }
 initStyles();

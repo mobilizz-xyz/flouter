@@ -59,14 +59,14 @@ export async function processImage(file) {
     out.width = W; out.height = H;
     const ctx = out.getContext('2d');
     ctx.drawImage(base, 0, 0);
-    anonymize(ctx, zones, settings().mode);
+    anonymize(ctx, zones, settings().mode, MASK_SCALE, settings().oval);
     return out;
   };
   it.export = () => new Promise((res) => flat().toBlob(res, 'image/jpeg', 0.92));
   const refresh = () => {
     setThumb(it, thumbOf(flat(), W, H));
     if (zones.length) setSub(it, `${plural(zones.length, 'visage')} flouté${zones.length > 1 ? 's' : ''} — vérifie`);
-    else setSub(it, 'Aucun visage détecté — vérifie', 'warn');
+    else setSub(it, 'Aucun flou — vérifie', 'warn');
   };
   refresh();
   it.dispose = onSettingsChange(refresh);
@@ -75,7 +75,7 @@ export async function processImage(file) {
 }
 
 // Retouche : toucher un visage pour le flouter, toucher un flou pour le choisir (coins pour l'agrandir,
-// glisser pour le déplacer, ✕ pour l'enlever), glisser sur une zone libre pour encadrer un objet.
+// glisser pour le déplacer, barre sous l'image : − / + / Supprimer), glisser sur une zone libre pour encadrer un objet.
 function openEditor(base, zones, media, status, hint, actions, refresh) {
   const W = base.width, H = base.height;
   const view = document.createElement('canvas');
@@ -91,50 +91,69 @@ function openEditor(base, zones, media, status, hint, actions, refresh) {
   // Pixels de l'image par pixel d'écran
   // (avant la mise en page, largeur nulle : on suppose une image affichée sur 900 pixels au plus)
   const scr = () => W / (view.getBoundingClientRect().width || Math.min(W, 900));
-  // Bouton ✕ du flou choisi : au-dessus du cadre, ou dessous s'il touche le haut de l'image
-  const delPos = (z) => {
-    const r = (touch ? 15 : 11) * scr(), gap = r * 1.5;
-    const y = z.y - gap >= r ? z.y - gap : Math.min(H - r, z.y + z.h + gap);
-    return { x: Math.min(W - r, Math.max(r, z.x + z.w / 2)), y, r };
-  };
   const drawBoxes = (skip = -1) => {
     const k = scr(), lw = 2 * k;
     zones.forEach((z0, i) => {
       if (i === skip) return;
       const z = shown(z0);
-      ctx.lineWidth = i === sel ? lw * 1.5 : lw;
+      ctx.lineWidth = i === sel ? lw * 2 : lw;
       ctx.strokeStyle = i === sel ? '#ffffff' : z0.auto ? '#22d3ee' : '#facc15';
       ctx.strokeRect(z.x, z.y, z.w, z.h);
     });
     const z0 = zones[sel];
     if (!z0 || sel === skip) return;
-    const z = shown(z0), hr = (touch ? 7 : 5) * k;
+    // Repères : points aux coins, traits au milieu des bords (on peut tirer partout sur le bord)
+    const z = shown(z0), hr = (touch ? 6 : 4.5) * k, t = (touch ? 5 : 4) * k, L = (touch ? 18 : 14) * k;
+    ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#0a0e13'; ctx.lineWidth = k;
     for (const [cx, cy] of CORNERS) {
       ctx.beginPath();
       ctx.arc(z.x + cx * z.w, z.y + cy * z.h, hr, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff'; ctx.fill();
-      ctx.lineWidth = k; ctx.strokeStyle = '#0a0e13'; ctx.stroke();
+      ctx.fill(); ctx.stroke();
     }
-    const d = delPos(z), a = d.r * 0.4;
-    ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-    ctx.fillStyle = '#dc2626'; ctx.fill();
-    ctx.lineWidth = 2.5 * k; ctx.strokeStyle = '#ffffff'; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(d.x - a, d.y - a); ctx.lineTo(d.x + a, d.y + a); ctx.moveTo(d.x + a, d.y - a); ctx.lineTo(d.x - a, d.y + a); ctx.stroke();
-    ctx.lineCap = 'butt';
+    const mx = z.x + z.w / 2, my = z.y + z.h / 2, lw2 = Math.min(L, z.w * 0.4), lh2 = Math.min(L, z.h * 0.4);
+    for (const [x, y, w, h] of [[mx - lw2 / 2, z.y - t / 2, lw2, t], [mx - lw2 / 2, z.y + z.h - t / 2, lw2, t],
+      [z.x - t / 2, my - lh2 / 2, t, lh2], [z.x + z.w - t / 2, my - lh2 / 2, t, lh2]]) {
+      ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    }
   };
+  // Barre du flou choisi : de vrais boutons, plus sûrs au doigt que des poignées sur l'image
+  const bar = el(`<div class="sel-bar" hidden>
+      <button type="button" class="btn small" data-a="minus" aria-label="Réduire">−</button>
+      <button type="button" class="btn small" data-a="plus" aria-label="Agrandir">+</button>
+      <button type="button" class="btn small danger" data-a="del">Supprimer</button>
+      <button type="button" class="btn small" data-a="ok">OK</button>
+    </div>`);
+  media.after(bar);
+  const B = (a) => bar.querySelector(`[data-a=${a}]`);
+  const resizeSel = (f) => {
+    const z0 = zones[sel];
+    if (!z0) return;
+    const b = grow(shown(z0), f);
+    if (b.w < 8 * scr() || b.h < 8 * scr()) return;
+    store(z0, b);
+    render();
+  };
+  B('minus').onclick = () => resizeSel(1 / 1.15);
+  B('plus').onclick = () => resizeSel(1.15);
+  B('del').onclick = () => { if (zones[sel]) { zones.splice(sel, 1); sel = -1; render(); } };
+  B('ok').onclick = () => { sel = -1; render(); };
   const render = () => {
+    bar.hidden = sel < 0 || !zones[sel];
+    // Flou choisi : le navigateur ne doit rien faire des gestes sur l'image (ni zoom, ni défilement),
+    // sinon Safari reprend la main en plein geste. Sans flou choisi, le zoom à deux doigts revient.
+    view.style.touchAction = zones[sel] ? 'none' : '';
     ctx.drawImage(base, 0, 0);
-    anonymize(ctx, zones, settings().mode);
+    anonymize(ctx, zones, settings().mode, MASK_SCALE, settings().oval);
     if (outlines) drawBoxes();
     const n = zones.length;
     status.textContent = n ? `${plural(n, 'flou')}. Un visage oublié ? ${touch ? 'Touche-le' : 'Clique dessus'}.`
-      : `Aucun visage trouvé. ${touch ? 'Touche' : 'Clique sur'} chaque visage pour le flouter.`;
+      : `Aucun flou sur cette photo. ${touch ? 'Touche' : 'Clique sur'} chaque visage à flouter.`;
     status.className = 'card-status' + (n ? '' : ' warn');
   };
   hint.innerHTML = touch
-    ? "Touche un visage oublié pour le <b>flouter</b>. Touche un flou pour le <b>choisir</b> : tire ses coins pour l'agrandir, glisse-le pour le déplacer, ✕ pour l'enlever. " +
+    ? "Touche un visage oublié pour le <b>flouter</b>. Touche un flou pour le <b>choisir</b>, puis glisse-le pour le <b>déplacer</b> ou tire un bord ou un coin pour changer sa <b>forme</b>. " +
       "Glisse le doigt sur une zone libre pour <b>encadrer</b> un objet (pancarte, tatouage). Écarte deux doigts pour zoomer."
-    : "Clique sur un visage oublié pour le <b>flouter</b>. Clique sur un flou pour le <b>choisir</b> : tire ses coins pour l'agrandir, fais-le glisser pour le déplacer, ✕ pour l'enlever. " +
+    : "Clique sur un visage oublié pour le <b>flouter</b>. Clique sur un flou pour le <b>choisir</b>, puis fais-le glisser pour le <b>déplacer</b> ou tire un bord ou un coin pour changer sa <b>forme</b>. " +
       "Clique et glisse sur une zone libre pour <b>encadrer</b> un objet (pancarte, tatouage).";
   const ob = el('<button class="btn">Masquer les contours</button>');
   ob.onclick = () => {
@@ -148,25 +167,39 @@ function openEditor(base, zones, media, status, hint, actions, refresh) {
     const b = view.getBoundingClientRect();
     return { x: ((e.clientX - b.left) / b.width) * W, y: ((e.clientY - b.top) / b.height) * H };
   };
+  const pad = (z, m) => ({ x: z.x - m, y: z.y - m, w: z.w + 2 * m, h: z.h + 2 * m });
   const inside = (p, z) => p.x >= z.x && p.x <= z.x + z.w && p.y >= z.y && p.y <= z.y + z.h;
-  // Le flou choisi passe devant les autres
-  const hitZone = (p) => {
-    if (zones[sel] && inside(p, shown(zones[sel]))) return sel;
-    for (let i = zones.length - 1; i >= 0; i--) if (inside(p, shown(zones[i]))) return i;
-    return -1;
+  // Flous sous le doigt, du plus probable au moins probable : le doigt n'a pas besoin d'être pile
+  // dans le cadre, et parmi des flous qui se chevauchent le plus proche puis le plus petit gagne.
+  const pickAt = (p) => {
+    const tol = (touch ? 16 : 0) * scr();
+    const out = [];
+    zones.forEach((z0, i) => {
+      const z = shown(z0);
+      const dx = Math.max(z.x - p.x, 0, p.x - z.x - z.w), dy = Math.max(z.y - p.y, 0, p.y - z.y - z.h);
+      const d = Math.hypot(dx, dy);
+      if (d <= tol) out.push({ i, d, c: Math.hypot(p.x - z.x - z.w / 2, p.y - z.y - z.h / 2), a: z.w * z.h });
+    });
+    // Le flou choisi reste attrapable avec une marge, pour le glisser même s'il est fin
+    if (zones[sel] && !out.some((o) => o.i === sel) && inside(p, pad(shown(zones[sel]), (touch ? 8 : 0) * scr()))) out.push({ i: sel, d: 0, c: 0, a: 0 });
+    out.sort((u, v) => u.d - v.d || u.a - v.a || u.c - v.c);
+    return out.map((o) => o.i);
   };
-  const hitCorner = (p) => {
+  // Bord ou coin du flou choisi sous le doigt : { ex, ey } (-1 gauche/haut, 1 droite/bas, 0 aucun).
+  // Le centre du cadre sert à le déplacer ; autour, le coin le plus proche gagne (geste le plus courant),
+  // et un bord s'attrape près de son trait, dedans comme dehors.
+  const hitEdge = (p) => {
     if (!zones[sel] || !outlines) return null;
-    const z = shown(zones[sel]), tol = (touch ? 22 : 10) * scr();
-    for (const [cx, cy] of CORNERS) {
-      if (Math.abs(p.x - (z.x + cx * z.w)) <= tol && Math.abs(p.y - (z.y + cy * z.h)) <= tol) return { cx, cy };
-    }
-    return null;
-  };
-  const hitDel = (p) => {
-    if (!zones[sel] || !outlines) return false;
-    const d = delPos(shown(zones[sel]));
-    return Math.hypot(p.x - d.x, p.y - d.y) <= d.r * 1.4;
+    const z = shown(zones[sel]), k = scr();
+    const band = (touch ? 22 : 8) * k, R = (touch ? 32 : 10) * k;
+    if (!inside(p, pad(z, band))) return null;
+    const inX = Math.min(band, z.w * 0.3), inY = Math.min(band, z.h * 0.3);
+    if (inside(p, { x: z.x + inX, y: z.y + inY, w: z.w - 2 * inX, h: z.h - 2 * inY })) return null;
+    const cx = p.x < z.x + z.w / 2 ? -1 : 1, cy = p.y < z.y + z.h / 2 ? -1 : 1;
+    if (Math.hypot(p.x - (cx < 0 ? z.x : z.x + z.w), p.y - (cy < 0 ? z.y : z.y + z.h)) <= R) return { ex: cx, ey: cy };
+    const ex = p.x < z.x + inX ? -1 : p.x > z.x + z.w - inX ? 1 : 0;
+    const ey = p.y < z.y + inY ? -1 : p.y > z.y + z.h - inY ? 1 : 0;
+    return ex || ey ? { ex, ey } : null;
   };
   // Cadre affiché → zone stockée (le rendu agrandit les zones de MASK_SCALE autour du centre)
   const store = (z0, b) => {
@@ -191,7 +224,7 @@ function openEditor(base, zones, media, status, hint, actions, refresh) {
     if (!drag.cache) {
       const others = drag.i == null ? zones : zones.filter((_, j) => j !== drag.i);
       ctx.drawImage(base, 0, 0);
-      anonymize(ctx, others, settings().mode);
+      anonymize(ctx, others, settings().mode, MASK_SCALE, settings().oval);
       if (outlines) drawBoxes(drag.i ?? -1);
       drag.cache = document.createElement('canvas');
       drag.cache.width = W; drag.cache.height = H;
@@ -211,8 +244,11 @@ function openEditor(base, zones, media, status, hint, actions, refresh) {
     const { kind, start, box0 } = drag;
     if (kind === 'move') return { ...box0, x: box0.x + p.x - start.x, y: box0.y + p.y - start.y };
     if (kind === 'resize') {
-      const o = { x: box0.x + (1 - drag.cx) * box0.w, y: box0.y + (1 - drag.cy) * box0.h };
-      return rect(o, p);
+      const { ex, ey } = drag, dx = p.x - start.x, dy = p.y - start.y;
+      let x1 = box0.x, y1 = box0.y, x2 = box0.x + box0.w, y2 = box0.y + box0.h;
+      if (ex < 0) x1 += dx; else if (ex > 0) x2 += dx;
+      if (ey < 0) y1 += dy; else if (ey > 0) y2 += dy;
+      return rect({ x: x1, y: y1 }, { x: x2, y: y2 });
     }
     return rect(start, p);
   };
@@ -222,9 +258,10 @@ function openEditor(base, zones, media, status, hint, actions, refresh) {
     if (fingers.size > 1) return cancel();
     const p = toImg(e);
     view.setPointerCapture(e.pointerId);
-    if (hitDel(p)) { drag = { start: p, moved: false, kind: 'del', i: sel }; return; }
-    const c = hitCorner(p), hit = c ? sel : hitZone(p);
-    drag = { start: p, moved: false, kind: c ? 'resize' : hit >= 0 ? 'move' : 'new', i: hit >= 0 ? hit : null };
+    const c = hitEdge(p), picks = c ? [sel] : pickAt(p);
+    // On glisse le flou choisi s'il est sous le doigt, sinon le plus probable
+    const hit = picks.includes(sel) ? sel : picks.length ? picks[0] : -1;
+    drag = { start: p, moved: false, kind: c ? 'resize' : hit >= 0 ? 'move' : 'new', i: hit >= 0 ? hit : null, picks };
     if (c) Object.assign(drag, c);
     if (hit >= 0) drag.box0 = shown(zones[hit]);
   });
@@ -232,24 +269,27 @@ function openEditor(base, zones, media, status, hint, actions, refresh) {
     const p = toImg(e);
     if (!drag) {
       if (e.pointerType !== 'mouse') return;
-      const c = hitCorner(p);
-      view.style.cursor = hitDel(p) ? 'pointer' : c ? (c.cx === c.cy ? 'nwse-resize' : 'nesw-resize') : hitZone(p) >= 0 ? 'move' : 'crosshair';
+      const c = hitEdge(p);
+      view.style.cursor = c ? (c.ex && c.ey ? (c.ex === c.ey ? 'nwse-resize' : 'nesw-resize') : c.ex ? 'ew-resize' : 'ns-resize') : pickAt(p).length ? 'move' : 'crosshair';
       return;
     }
-    if (drag.kind === 'del') return;
     const min = 12 * scr(); // 12 pixels à l'écran
     if (!drag.moved && Math.abs(p.x - drag.start.x) < min && Math.abs(p.y - drag.start.y) < min) return;
     drag.moved = true;
     preview(boxOf(p));
   });
+  // Safari : bloquer le défilement dès le premier mouvement d'un geste à un doigt sur l'image
+  view.addEventListener('touchmove', (e) => { if (drag && e.touches.length === 1) e.preventDefault(); }, { passive: false });
   view.addEventListener('pointercancel', (e) => { fingers.delete(e.pointerId); cancel(); });
   view.addEventListener('pointerup', (e) => {
     fingers.delete(e.pointerId);
     if (!drag) return;
-    const { kind, i, moved } = drag;
-    if (kind === 'del') { if (hitDel(toImg(e))) { zones.splice(i, 1); sel = -1; } }
-    else if (!moved) {
-      if (i != null) sel = i === sel ? -1 : i; // toucher un flou : le choisir, ou le lâcher s'il l'était
+    const { kind, i, moved, picks } = drag;
+    if (!moved) {
+      if (kind === 'resize') { /* simple appui sur un bord : rien */ }
+      else if (picks.includes(sel)) sel = -1; // retoucher le flou choisi : le lâcher
+      else if (picks.length) sel = picks[0];
+      else if (sel >= 0) sel = -1; // toucher à côté : d'abord lâcher le flou choisi, sans en ajouter
       else addFace(drag.start);
     } else {
       const box = boxOf(toImg(e)), min = 8 * scr();
@@ -267,7 +307,7 @@ function openEditor(base, zones, media, status, hint, actions, refresh) {
   let lastW = 0;
   const ro = new ResizeObserver(() => { const w = view.getBoundingClientRect().width; if (w && w !== lastW && !drag) { lastW = w; render(); } });
   ro.observe(view);
-  return () => { ro.disconnect(); off(); refresh(); };
+  return () => { ro.disconnect(); off(); bar.remove(); refresh(); };
 }
 
 const CORNERS = [[0, 0], [1, 0], [0, 1], [1, 1]];

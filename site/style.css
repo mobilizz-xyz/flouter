@@ -87,6 +87,17 @@ input[type=radio], input[type=checkbox] { width: 20px; height: 20px; accent-colo
 .emoji-btn[aria-pressed=true] { border-color: var(--cyan); box-shadow: 0 0 0 2px var(--cyan); }
 .emoji-other { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: .85rem; color: var(--muted); }
 .emoji-other input { width: 64px; height: 40px; font-size: 22px; text-align: center; color: #fff; background: #000; border: 1px solid var(--line); border-radius: 10px; }
+.shape { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 0; border: 0; }
+.shape legend { float: left; margin-right: 2px; font-size: .8rem; font-weight: 600; color: var(--muted); }
+.shape label { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--panel); border: 1.5px solid transparent; border-radius: 999px; font-size: .8rem; font-weight: 600; color: var(--muted); cursor: pointer; }
+:root[data-theme=light] .shape label { border-color: var(--line); }
+.shape input { position: absolute; opacity: 0; pointer-events: none; }
+.shape label:has(input:checked) { border-color: var(--cyan); background: var(--chosen); color: var(--text); }
+:root[data-theme=light] .shape label:has(input:checked) { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+.shape label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sh { width: 16px; height: 20px; background: currentColor; flex: none; }
+.sh-rect { border-radius: 2px; }
+.sh-oval { border-radius: 50%; }
 .styles-note { font-size: .85rem; color: var(--muted); margin: 0 2px 14px; }
 .styles-note b { color: var(--text); }
 
@@ -183,6 +194,10 @@ body.noscroll { overflow: hidden; }
 .canvas-wrap { background: #000; border-radius: var(--r-sm); overflow: hidden; }
 .canvas-wrap canvas, .canvas-wrap video { display: block; width: 100%; height: auto; max-height: 70vh; object-fit: contain; }
 .canvas-wrap video { touch-action: auto; }
+.sel-bar { display: flex; gap: 8px; margin-top: 10px; }
+.sel-bar[hidden] { display: none; }
+.sel-bar .btn { flex: 1; min-height: 48px; font-size: 1rem; }
+.sel-bar [data-a=minus], .sel-bar [data-a=plus] { flex: 0 0 56px; font-size: 1.4rem; }
 .hint { color: var(--muted); font-size: .9rem; margin-top: 8px; margin-bottom: 8px; }
 .zed { position: relative; width: 100%; margin: 0 auto; background: #000; }
 .zed video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
