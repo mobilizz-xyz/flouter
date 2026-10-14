@@ -83,6 +83,20 @@ export function openZoneEditor(it, onApply) {
   const pt = (e) => { const r = cv.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; };
   let start = null;
   cv.addEventListener('pointerdown', (e) => { e.preventDefault(); v.pause(); start = pt(e); cv.setPointerCapture(e.pointerId); });
+  // Cadre en pointillés pendant qu'on glisse
+  cv.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    const p = pt(e);
+    if (Math.abs(p.x - start.x) <= 0.02 && Math.abs(p.y - start.y) <= 0.02) return;
+    render();
+    const c = cv.getContext('2d');
+    c.setLineDash([8, 6]);
+    c.strokeStyle = '#facc15'; c.lineWidth = 2; c.fillStyle = 'rgba(250,204,21,.25)';
+    const x = Math.min(start.x, p.x) * cv.width, y = Math.min(start.y, p.y) * cv.height;
+    const w = Math.abs(p.x - start.x) * cv.width, h = Math.abs(p.y - start.y) * cv.height;
+    c.fillRect(x, y, w, h); c.strokeRect(x, y, w, h);
+    c.setLineDash([]);
+  });
   cv.addEventListener('pointerup', (e) => {
     if (!start) return;
     const end = pt(e), t = T();

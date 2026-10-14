@@ -183,7 +183,7 @@ body.noscroll { overflow: hidden; }
 .canvas-wrap { background: #000; border-radius: var(--r-sm); overflow: hidden; }
 .canvas-wrap canvas, .canvas-wrap video { display: block; width: 100%; height: auto; max-height: 70vh; object-fit: contain; }
 .canvas-wrap video { touch-action: auto; }
-.hint { color: var(--muted); font-size: .9rem; margin: 8px 0; }
+.hint { color: var(--muted); font-size: .9rem; margin-top: 8px; margin-bottom: 8px; }
 .zed { position: relative; width: 100%; margin: 0 auto; background: #000; }
 .zed video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .zed canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
