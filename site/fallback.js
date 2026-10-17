@@ -4,7 +4,8 @@ import { sleep } from './dom.js';
 import { setCancelled, setError, setReady, setSub, showActions, updateBulk } from './list.js';
 import { openReport } from './report.js';
 
-const CHUNK = 48 * 1024 * 1024; // envoi en morceaux : passe les limites de taille des intermédiaires
+const CHUNK = 8 * 1024 * 1024; // petits morceaux : une coupure ne fait perdre que quelques secondes d'envoi
+const RETRIES = 6; // nouveaux essais par morceau après une coupure réseau
 
 export function offerServer(it, file, s, reason) {
   it.state = 'wait';
@@ -30,14 +31,17 @@ function sendChunk(url, part, onProgress, setXhr) {
     const xhr = new XMLHttpRequest();
     setXhr(xhr);
     xhr.open('POST', url);
+    xhr.timeout = 120000; // morceau bloqué (réseau mobile figé) : on abandonne et on réessaie
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded); };
     xhr.onload = () => {
       if (xhr.status === 200) return resolve();
       let error = 'envoi refusé';
       try { error = JSON.parse(xhr.responseText).error || error; } catch { /* réponse non JSON */ }
-      reject(new Error(error));
+      // Erreurs des intermédiaires (Cloudflare 5xx, page HTML) : traitées comme une coupure
+      reject(Object.assign(new Error(error), { network: xhr.status === 0 || xhr.status >= 500 }));
     };
-    xhr.onerror = () => reject(new Error('envoi impossible (réseau ?)'));
+    xhr.onerror = () => reject(Object.assign(new Error('envoi impossible (réseau ?)'), { network: true }));
+    xhr.ontimeout = xhr.onerror;
     xhr.onabort = () => reject(new Error('cancel'));
     xhr.send(part);
   });
@@ -75,11 +79,25 @@ async function runServer(it, file, s) {
 
     for (let off = 0; off < file.size; off += CHUNK) {
       const part = file.slice(off, Math.min(file.size, off + CHUNK));
-      await sendChunk(`/api/uploads/${id}?offset=${off}`, part, (loaded) => {
-        const done = (off + loaded) / file.size;
-        bar.value = done;
-        setSub(it, `Envoi… ${Math.round(done * 100)} %`);
-      }, (x) => { xhr = x; });
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await sendChunk(`/api/uploads/${id}?offset=${off}`, part, (loaded) => {
+            const done = (off + loaded) / file.size;
+            bar.value = done;
+            setSub(it, `Envoi… ${Math.round(done * 100)} %`);
+          }, (x) => { xhr = x; });
+          break;
+        } catch (e) {
+          if (!e.network || attempt >= RETRIES || cancelled) throw e;
+          // Le serveur garde ce qui est déjà arrivé : on renvoie seulement ce morceau
+          const wait = Math.min(30, 2 ** attempt * 2);
+          for (let t = wait; t > 0 && !cancelled; t--) {
+            setSub(it, `Connexion perdue, nouvel essai dans ${t} s… (garde cette page ouverte)`, 'warn');
+            await sleep(1000);
+          }
+          if (cancelled) throw new Error('cancel');
+        }
+      }
     }
 
     while (!cancelled) {
@@ -111,7 +129,8 @@ async function runServer(it, file, s) {
   } catch (e) {
     // Après une annulation, les réponses encore en route (tâche effacée…) ne comptent plus
     if (!cancelled && e.message !== 'cancel') {
-      it.diag = { ...(it.diag || {}), step: 'serveur', error: e.message };
+      const d = it.diag || {};
+      it.diag = { ...d, step: 'serveur', error: e.message, local: d.step ? `${d.step} : ${d.error || ''}` : '' };
       setError(it, 'Serveur : ' + e.message);
     }
   }

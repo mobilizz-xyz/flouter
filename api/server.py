@@ -11,6 +11,7 @@ API (toutes les réponses sont en JSON, sauf le résultat) :
   POST /api/jobs/<id>/cancel                         abandon
   POST /api/report                                   signalement d'un problème (diagnostic technique)
 """
+import io
 import json
 import os
 import re
@@ -34,11 +35,11 @@ MAX_QUEUE = int(os.environ.get('MAX_QUEUE', 8))                # vidéos en atte
 WORK_BYTES = int(os.environ.get('WORK_MB', 2800)) * MB         # place réservable dans /work (taille du tmpfs moins une marge)
 CHUNK_MAX = 64 * MB
 TTL = 15 * 60       # résultat non récupéré : effacé au bout de 15 min
-IDLE_UPLOAD = 120   # envoi abandonné : effacé après 2 min sans nouveau morceau
+IDLE_UPLOAD = 600   # envoi abandonné : effacé après 10 min sans nouveau morceau (laisse le temps aux nouveaux essais)
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 REPORTS = '/reports/reports.jsonl'  # signalements de problèmes (aucun fichier, aucune IP)
-REPORT_FIELDS = {'os', 'browser', 'inapp', 'features', 'kind', 'container', 'codec', 'size', 'duration', 'step', 'error', 'comment', 'version'}
+REPORT_FIELDS = {'os', 'browser', 'inapp', 'features', 'kind', 'container', 'codec', 'size', 'duration', 'step', 'error', 'local', 'comment', 'version'}
 REPORTS_MAX = 5 * MB
 report_times = deque(maxlen=60)  # au plus 60 signalements par heure
 
@@ -239,16 +240,41 @@ class Handler(BaseHTTPRequestHandler):
         """Envoi en morceaux : passe les limites de taille des intermédiaires."""
         job = jobs.get(jid)
         length = self.length()
-        if not job or job['state'] != 'uploading':
+        if not job:
+            return self.reply(404, {'error': 'envoi introuvable ou expiré'})
+        if 0 < length <= CHUNK_MAX and q.get('offset') == str(job['received'] - length):
+            # Morceau déjà reçu dont la réponse s'est perdue : le téléphone le renvoie, on l'ignore
+            try:
+                self.read_into(io.BytesIO(), length)
+            except OSError:
+                return self.reply(503, {'error': 'envoi interrompu'})
+            job['touched'] = time.time()
+            return self.reply(200, {'received': job['received']})
+        if job['state'] != 'uploading':
             return self.reply(404, {'error': 'envoi introuvable ou expiré'})
         if not 0 < length <= CHUNK_MAX or q.get('offset') != str(job['received']) or job['received'] + length > job['size']:
             return self.reply(400, {'error': 'morceau invalide'})
+        with lock:
+            if job.get('busy'):  # ancien essai encore en cours de lecture : le téléphone réessaiera
+                return self.reply(503, {'error': 'envoi déjà en cours'})
+            job['busy'] = True
+        try:
+            self.write_chunk(jid, job, length)
+        finally:
+            job['busy'] = False
+
+    def write_chunk(self, jid, job, length):
         try:
             with open(f'{job_dir(jid)}/in', 'ab') as f:
-                self.read_into(f, length)
+                try:
+                    self.read_into(f, length)
+                except OSError:
+                    # Coupure réseau : on revient à ce qui était complet, le téléphone renverra ce morceau
+                    f.truncate(job['received'])
+                    raise
         except OSError:
-            drop(jid)
-            return self.reply(400, {'error': 'envoi interrompu'})
+            job['touched'] = time.time()
+            return self.reply(503, {'error': 'envoi interrompu'})
         job['received'] += length
         job['touched'] = time.time()
         if job['received'] == job['size']:

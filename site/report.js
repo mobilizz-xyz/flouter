@@ -49,6 +49,7 @@ export async function openReport(it, message) {
     version: VERSION, os: osName(), browser: browserName(), inapp: INAPP, features: await features(),
     kind: it?.kind || '', container: it?.file ? `${ext} ${it.file.type || ''}`.trim() : '', size: it?.file ? sizeBucket(it.file.size) : '',
     codec: it?.diag?.codec || '', step: it?.diag?.step || '', error: it?.diag?.error || message || '',
+    local: it?.diag?.local || '',
   };
   for (const k of Object.keys(pendingReport)) if (!pendingReport[k]) delete pendingReport[k];
   $('#r-data').textContent = Object.entries(pendingReport).map(([k, v]) => `${k} : ${v}`).join('\n');
